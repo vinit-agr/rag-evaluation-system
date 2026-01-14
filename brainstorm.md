@@ -380,10 +380,14 @@ class ChunkLevelDatasetExample(TypedDict):
     LangSmith dataset example schema for chunk-level evaluation.
 
     This is the format used when storing/retrieving data from LangSmith.
-    Follows LangSmith's inputs/outputs convention.
+    Follows LangSmith's inputs/outputs/metadata convention.
+
+    The inputs contain the query along with its ID and metadata (generation info,
+    persona, difficulty, etc.). These are captured during synthetic data generation.
     """
-    inputs: Dict[str, QueryText]        # {"query": "What is RAG?"}
+    inputs: Dict[str, Any]              # {"query": "What is RAG?", "query_id": "query_xxx", "query_metadata": {...}}
     outputs: Dict[str, List[ChunkId]]   # {"relevant_chunk_ids": ["chunk_xxx", ...]}
+    metadata: Dict[str, Any]            # Top-level metadata for LangSmith (source_docs, generation_model, etc.)
 
 
 class ChunkLevelRunOutput(TypedDict):
@@ -434,9 +438,13 @@ class TokenLevelDatasetExample(TypedDict):
 
     This is the format used when storing/retrieving data from LangSmith.
     Stores full character span data including text for convenience.
+
+    The inputs contain the query along with its ID and metadata (generation info,
+    persona, difficulty, etc.). These are captured during synthetic data generation.
     """
-    inputs: Dict[str, QueryText]  # {"query": "What is RAG?"}
-    outputs: Dict[str, Any]       # {"relevant_spans": [{doc_id, start, end, text}, ...]}
+    inputs: Dict[str, Any]                    # {"query": "What is RAG?", "query_id": "query_xxx", "query_metadata": {...}}
+    outputs: Dict[str, List[CharacterSpan]]   # {"relevant_spans": [CharacterSpan(...), ...]}
+    metadata: Dict[str, Any]                  # Top-level metadata for LangSmith (generation_model, etc.)
 
 
 class TokenLevelRunOutput(TypedDict):
@@ -610,7 +618,7 @@ def generate_pa_chunk_id(content: str) -> PositionAwareChunkId:
 from abc import ABC, abstractmethod
 from typing import Optional, Dict
 
-class SyntheticDataGenerator(ABC):
+class SyntheticDatasetGenerator(ABC):
     """Base class for synthetic data generation."""
 
     def __init__(self, llm_client, corpus: Corpus):
@@ -618,7 +626,7 @@ class SyntheticDataGenerator(ABC):
         self.corpus = corpus
 
 
-class ChunkLevelDataGenerator(SyntheticDataGenerator):
+class ChunkLevelSyntheticDatasetGenerator(SyntheticDatasetGenerator):
     """
     Generate synthetic QA pairs with chunk-level ground truth.
 
@@ -672,7 +680,7 @@ class ChunkLevelDataGenerator(SyntheticDataGenerator):
         ...
 
 
-class TokenLevelDataGenerator(SyntheticDataGenerator):
+class TokenLevelSyntheticDatasetGenerator(SyntheticDatasetGenerator):
     """
     Generate synthetic QA pairs with character span ground truth.
 
@@ -907,31 +915,31 @@ class ChunkLevelMetric(ABC):
 class ChunkRecall(ChunkLevelMetric):
     """What fraction of relevant chunks were retrieved?"""
 
-    def calculate(self, retrieved: List[ChunkId], ground_truth: List[ChunkId]) -> float:
-        if not ground_truth:
+    def calculate(self, retrieved_chunk_ids: List[ChunkId], ground_truth_chunk_ids: List[ChunkId]) -> float:
+        if not ground_truth_chunk_ids:
             return 0.0
-        retrieved_set = set(retrieved)
-        ground_truth_set = set(ground_truth)
+        retrieved_set = set(retrieved_chunk_ids)
+        ground_truth_set = set(ground_truth_chunk_ids)
         return len(retrieved_set & ground_truth_set) / len(ground_truth_set)
 
 
 class ChunkPrecision(ChunkLevelMetric):
     """What fraction of retrieved chunks were relevant?"""
 
-    def calculate(self, retrieved: List[ChunkId], ground_truth: List[ChunkId]) -> float:
-        if not retrieved:
+    def calculate(self, retrieved_chunk_ids: List[ChunkId], ground_truth_chunk_ids: List[ChunkId]) -> float:
+        if not retrieved_chunk_ids:
             return 0.0
-        retrieved_set = set(retrieved)
-        ground_truth_set = set(ground_truth)
+        retrieved_set = set(retrieved_chunk_ids)
+        ground_truth_set = set(ground_truth_chunk_ids)
         return len(retrieved_set & ground_truth_set) / len(retrieved_set)
 
 
 class ChunkF1(ChunkLevelMetric):
     """Harmonic mean of chunk precision and recall."""
 
-    def calculate(self, retrieved: List[ChunkId], ground_truth: List[ChunkId]) -> float:
-        recall = ChunkRecall().calculate(retrieved, ground_truth)
-        precision = ChunkPrecision().calculate(retrieved, ground_truth)
+    def calculate(self, retrieved_chunk_ids: List[ChunkId], ground_truth_chunk_ids: List[ChunkId]) -> float:
+        recall = ChunkRecall().calculate(retrieved_chunk_ids, ground_truth_chunk_ids)
+        precision = ChunkPrecision().calculate(retrieved_chunk_ids, ground_truth_chunk_ids)
         if recall + precision == 0:
             return 0.0
         return 2 * (precision * recall) / (precision + recall)
@@ -966,19 +974,19 @@ class SpanRecall(TokenLevelMetric):
 
     def calculate(
         self,
-        retrieved: List[CharacterSpan],
-        ground_truth: List[CharacterSpan]
+        retrieved_spans: List[CharacterSpan],
+        ground_truth_spans: List[CharacterSpan]
     ) -> float:
-        if not ground_truth:
+        if not ground_truth_spans:
             return 0.0
 
         # Merge overlapping retrieved spans to avoid double-counting
-        merged_retrieved = self._merge_spans(retrieved)
+        merged_retrieved = self._merge_spans(retrieved_spans)
 
-        total_gt_chars = sum(span.length() for span in ground_truth)
+        total_gt_chars = sum(span.length() for span in ground_truth_spans)
 
         # Calculate overlap (each GT char counted at most once)
-        overlap_chars = self._calculate_total_overlap(ground_truth, merged_retrieved)
+        overlap_chars = self._calculate_total_overlap(ground_truth_spans, merged_retrieved)
 
         return min(overlap_chars / total_gt_chars, 1.0)
 
@@ -1008,18 +1016,18 @@ class SpanPrecision(TokenLevelMetric):
 
     def calculate(
         self,
-        retrieved: List[CharacterSpan],
-        ground_truth: List[CharacterSpan]
+        retrieved_spans: List[CharacterSpan],
+        ground_truth_spans: List[CharacterSpan]
     ) -> float:
-        if not retrieved:
+        if not retrieved_spans:
             return 0.0
 
         # Merge overlapping retrieved spans
-        merged_retrieved = self._merge_spans(retrieved)
+        merged_retrieved = self._merge_spans(retrieved_spans)
 
         total_ret_chars = sum(span.length() for span in merged_retrieved)
 
-        overlap_chars = self._calculate_total_overlap(merged_retrieved, ground_truth)
+        overlap_chars = self._calculate_total_overlap(merged_retrieved, ground_truth_spans)
 
         return min(overlap_chars / total_ret_chars, 1.0)
 
@@ -1038,16 +1046,16 @@ class SpanIoU(TokenLevelMetric):
 
     def calculate(
         self,
-        retrieved: List[CharacterSpan],
-        ground_truth: List[CharacterSpan]
+        retrieved_spans: List[CharacterSpan],
+        ground_truth_spans: List[CharacterSpan]
     ) -> float:
-        if not retrieved and not ground_truth:
+        if not retrieved_spans and not ground_truth_spans:
             return 1.0
-        if not retrieved or not ground_truth:
+        if not retrieved_spans or not ground_truth_spans:
             return 0.0
 
-        merged_retrieved = self._merge_spans(retrieved)
-        merged_gt = self._merge_spans(ground_truth)
+        merged_retrieved = self._merge_spans(retrieved_spans)
+        merged_gt = self._merge_spans(ground_truth_spans)
 
         intersection = self._calculate_total_overlap(merged_retrieved, merged_gt)
 
@@ -1072,14 +1080,21 @@ Stores chunk IDs as ground truth.
   "description": "Ground truth for chunk-level RAG evaluation",
   "example_schema": {
     "inputs": {
-      "query": "string"
+      "query": "string",
+      "query_id": "string (format: query_xxxxxxxxxx)",
+      "query_metadata": {
+        "generation_type": "string (synthetic | manual)",
+        "persona": "string (optional)",
+        "difficulty": "string (optional)",
+        "query_type": "string (optional)"
+      }
     },
     "outputs": {
-      "relevant_chunk_ids": ["string (format: chunk_xxxxxxxxxx)"],
-      "metadata": {
-        "source_docs": ["string"],
-        "generation_model": "string"
-      }
+      "relevant_chunk_ids": ["string (format: chunk_xxxxxxxxxx)"]
+    },
+    "metadata": {
+      "source_docs": ["string"],
+      "generation_model": "string"
     }
   }
 }
@@ -1088,13 +1103,21 @@ Stores chunk IDs as ground truth.
 Example:
 ```json
 {
-  "inputs": {"query": "What are the benefits of RAG?"},
-  "outputs": {
-    "relevant_chunk_ids": ["chunk_a3f2b1c8d9e0", "chunk_7d9e4f2a1b3c", "chunk_1b3c5d7e9f0a"],
-    "metadata": {
-      "source_docs": ["rag_overview.md"],
-      "generation_model": "gpt-4"
+  "inputs": {
+    "query": "What are the benefits of RAG?",
+    "query_id": "query_f47ac10b",
+    "query_metadata": {
+      "generation_type": "synthetic",
+      "persona": "developer",
+      "difficulty": "medium"
     }
+  },
+  "outputs": {
+    "relevant_chunk_ids": ["chunk_a3f2b1c8d9e0", "chunk_7d9e4f2a1b3c", "chunk_1b3c5d7e9f0a"]
+  },
+  "metadata": {
+    "source_docs": ["rag_overview.md"],
+    "generation_model": "gpt-4"
   }
 }
 ```
@@ -1109,7 +1132,14 @@ Stores full character span data including text. NO chunk IDs - these are raw exc
   "description": "Ground truth for token-level RAG evaluation (character spans)",
   "example_schema": {
     "inputs": {
-      "query": "string"
+      "query": "string",
+      "query_id": "string (format: query_xxxxxxxxxx)",
+      "query_metadata": {
+        "generation_type": "string (synthetic | manual)",
+        "persona": "string (optional)",
+        "difficulty": "string (optional)",
+        "query_type": "string (optional)"
+      }
     },
     "outputs": {
       "relevant_spans": [
@@ -1119,10 +1149,10 @@ Stores full character span data including text. NO chunk IDs - these are raw exc
           "end": "integer",
           "text": "string"
         }
-      ],
-      "metadata": {
-        "generation_model": "string"
-      }
+      ]
+    },
+    "metadata": {
+      "generation_model": "string"
     }
   }
 }
@@ -1131,7 +1161,15 @@ Stores full character span data including text. NO chunk IDs - these are raw exc
 Example:
 ```json
 {
-  "inputs": {"query": "What are the benefits of RAG?"},
+  "inputs": {
+    "query": "What are the benefits of RAG?",
+    "query_id": "query_f47ac10b",
+    "query_metadata": {
+      "generation_type": "synthetic",
+      "persona": "developer",
+      "difficulty": "medium"
+    }
+  },
   "outputs": {
     "relevant_spans": [
       {
@@ -1146,10 +1184,10 @@ Example:
         "end": 2298,
         "text": "Key advantages include reduced hallucination and access to current information..."
       }
-    ],
-    "metadata": {
-      "generation_model": "gpt-4"
-    }
+    ]
+  },
+  "metadata": {
+    "generation_model": "gpt-4"
   }
 }
 ```
@@ -1167,7 +1205,7 @@ This is intentional because:
 **Decision**: Use explicit separate classes (`ChunkLevelEvaluation` and `TokenLevelEvaluation`).
 
 ```python
-from rag_evaluation_framework import (
+from rag_evaluation_system import (
     Corpus,
     ChunkLevelEvaluation,
     TokenLevelEvaluation,
@@ -1221,9 +1259,9 @@ result = eval.run(
 ### Token-Level (Recommended for Chunker Comparison)
 
 ```python
-from rag_evaluation_framework import (
+from rag_evaluation_system import (
     Corpus,
-    TokenLevelDataGenerator,
+    TokenLevelSyntheticDatasetGenerator,
     TokenLevelEvaluation,
     RecursiveCharacterChunker,
     FixedTokenChunker,
@@ -1238,7 +1276,7 @@ corpus = Corpus.from_folder("./knowledge_base")
 
 # 2. Generate synthetic data (one-time)
 # Note: NO chunker required - ground truth is character spans!
-generator = TokenLevelDataGenerator(
+generator = TokenLevelSyntheticDatasetGenerator(
     llm_client=OpenAI(),
     corpus=corpus,
 )
@@ -1278,9 +1316,9 @@ for chunker in chunkers_to_test:
 ### Chunk-Level (Simpler, but Chunker-Dependent Ground Truth)
 
 ```python
-from rag_evaluation_framework import (
+from rag_evaluation_system import (
     Corpus,
-    ChunkLevelDataGenerator,
+    ChunkLevelSyntheticDatasetGenerator,
     ChunkLevelEvaluation,
     RecursiveCharacterChunker,
     OpenAIEmbedder,
@@ -1294,7 +1332,7 @@ chunker = RecursiveCharacterChunker(chunk_size=200)
 
 # 3. Generate synthetic data with this chunker
 # LLM generates queries AND identifies relevant chunk IDs together
-generator = ChunkLevelDataGenerator(
+generator = ChunkLevelSyntheticDatasetGenerator(
     llm_client=OpenAI(),
     corpus=corpus,
     chunker=chunker,  # Required! Ground truth is tied to this chunker.
@@ -1478,13 +1516,13 @@ Create separate folders for chunk-level and token-level synthetic data generatio
 ```
 synthetic_datagen/
 ├── __init__.py
-├── base.py                  # Base SyntheticDataGenerator class
+├── base.py                  # Base SyntheticDatasetGenerator class
 ├── chunk_level/
 │   ├── __init__.py
-│   └── generator.py         # ChunkLevelDataGenerator
+│   └── generator.py         # ChunkLevelSyntheticDatasetGenerator
 └── token_level/
     ├── __init__.py
-    └── generator.py         # TokenLevelDataGenerator
+    └── generator.py         # TokenLevelSyntheticDatasetGenerator
 ```
 
 **Rationale**: The strategy for generating synthetic data and the format in which
@@ -1500,8 +1538,8 @@ Keeping them in separate folders makes the codebase clearer and easier to mainta
 
 1. **Define** final type definitions in `types.py`
 2. **Implement** `PositionAwareChunker` interface and adapter
-3. **Implement** `TokenLevelDataGenerator` with excerpt extraction (in `synthetic_datagen/token_level/`)
-4. **Implement** `ChunkLevelDataGenerator` with citation-style query generation (in `synthetic_datagen/chunk_level/`)
+3. **Implement** `TokenLevelSyntheticDatasetGenerator` with excerpt extraction (in `synthetic_datagen/token_level/`)
+4. **Implement** `ChunkLevelSyntheticDatasetGenerator` with citation-style query generation (in `synthetic_datagen/chunk_level/`)
 5. **Implement** span-based metrics with interval merging (in `evaluation/metrics/token_level/`)
 6. **Implement** chunk-based metrics (in `evaluation/metrics/chunk_level/`)
 7. **Implement** `TokenLevelEvaluation.run()`
