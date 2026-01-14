@@ -381,11 +381,8 @@ class ChunkLevelDatasetExample(TypedDict):
 
     This is the format used when storing/retrieving data from LangSmith.
     Follows LangSmith's inputs/outputs/metadata convention.
-
-    The inputs contain the query along with its ID and metadata (generation info,
-    persona, difficulty, etc.). These are captured during synthetic data generation.
     """
-    inputs: Dict[str, Any]              # {"query": "What is RAG?", "query_id": "query_xxx", "query_metadata": {...}}
+    inputs: Dict[str, QueryText]        # {"query": "What is RAG?"}
     outputs: Dict[str, List[ChunkId]]   # {"relevant_chunk_ids": ["chunk_xxx", ...]}
     metadata: Dict[str, Any]            # Top-level metadata for LangSmith (source_docs, generation_model, etc.)
 
@@ -438,11 +435,8 @@ class TokenLevelDatasetExample(TypedDict):
 
     This is the format used when storing/retrieving data from LangSmith.
     Stores full character span data including text for convenience.
-
-    The inputs contain the query along with its ID and metadata (generation info,
-    persona, difficulty, etc.). These are captured during synthetic data generation.
     """
-    inputs: Dict[str, Any]                    # {"query": "What is RAG?", "query_id": "query_xxx", "query_metadata": {...}}
+    inputs: Dict[str, QueryText]              # {"query": "What is RAG?"}
     outputs: Dict[str, List[CharacterSpan]]   # {"relevant_spans": [CharacterSpan(...), ...]}
     metadata: Dict[str, Any]                  # Top-level metadata for LangSmith (generation_model, etc.)
 
@@ -1080,21 +1074,18 @@ Stores chunk IDs as ground truth.
   "description": "Ground truth for chunk-level RAG evaluation",
   "example_schema": {
     "inputs": {
-      "query": "string",
-      "query_id": "string (format: query_xxxxxxxxxx)",
-      "query_metadata": {
-        "generation_type": "string (synthetic | manual)",
-        "persona": "string (optional)",
-        "difficulty": "string (optional)",
-        "query_type": "string (optional)"
-      }
+      "query": "string"
     },
     "outputs": {
       "relevant_chunk_ids": ["string (format: chunk_xxxxxxxxxx)"]
     },
     "metadata": {
       "source_docs": ["string"],
-      "generation_model": "string"
+      "generation_model": "string",
+      "generation_type": "string (synthetic | manual)",
+      "persona": "string (optional)",
+      "difficulty": "string (optional)",
+      "query_type": "string (optional)"
     }
   }
 }
@@ -1104,20 +1095,17 @@ Example:
 ```json
 {
   "inputs": {
-    "query": "What are the benefits of RAG?",
-    "query_id": "query_f47ac10b",
-    "query_metadata": {
-      "generation_type": "synthetic",
-      "persona": "developer",
-      "difficulty": "medium"
-    }
+    "query": "What are the benefits of RAG?"
   },
   "outputs": {
     "relevant_chunk_ids": ["chunk_a3f2b1c8d9e0", "chunk_7d9e4f2a1b3c", "chunk_1b3c5d7e9f0a"]
   },
   "metadata": {
     "source_docs": ["rag_overview.md"],
-    "generation_model": "gpt-4"
+    "generation_model": "gpt-4",
+    "generation_type": "synthetic",
+    "persona": "developer",
+    "difficulty": "medium"
   }
 }
 ```
@@ -1132,14 +1120,7 @@ Stores full character span data including text. NO chunk IDs - these are raw exc
   "description": "Ground truth for token-level RAG evaluation (character spans)",
   "example_schema": {
     "inputs": {
-      "query": "string",
-      "query_id": "string (format: query_xxxxxxxxxx)",
-      "query_metadata": {
-        "generation_type": "string (synthetic | manual)",
-        "persona": "string (optional)",
-        "difficulty": "string (optional)",
-        "query_type": "string (optional)"
-      }
+      "query": "string"
     },
     "outputs": {
       "relevant_spans": [
@@ -1152,7 +1133,12 @@ Stores full character span data including text. NO chunk IDs - these are raw exc
       ]
     },
     "metadata": {
-      "generation_model": "string"
+      "source_docs": ["string"],
+      "generation_model": "string",
+      "generation_type": "string (synthetic | manual)",
+      "persona": "string (optional)",
+      "difficulty": "string (optional)",
+      "query_type": "string (optional)"
     }
   }
 }
@@ -1162,13 +1148,7 @@ Example:
 ```json
 {
   "inputs": {
-    "query": "What are the benefits of RAG?",
-    "query_id": "query_f47ac10b",
-    "query_metadata": {
-      "generation_type": "synthetic",
-      "persona": "developer",
-      "difficulty": "medium"
-    }
+    "query": "What are the benefits of RAG?"
   },
   "outputs": {
     "relevant_spans": [
@@ -1187,7 +1167,11 @@ Example:
     ]
   },
   "metadata": {
-    "generation_model": "gpt-4"
+    "source_docs": ["rag_overview.md"],
+    "generation_model": "gpt-4",
+    "generation_type": "synthetic",
+    "persona": "developer",
+    "difficulty": "medium"
   }
 }
 ```
