@@ -4,27 +4,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **RAG (Retrieval-Augmented Generation) Evaluation Framework** in Python. Currently in the architectural design phase—see `brainstorm.md` for the complete design. No implementation code exists yet.
+This is a **RAG (Retrieval-Augmented Generation) Evaluation System** in Python. Currently in the architectural design phase—see `brainstorm.md` for the complete design and `implementation_plan.md` for detailed implementation steps.
 
-The framework supports two evaluation paradigms:
+The system supports two evaluation paradigms:
 - **Chunk-Level**: Ground truth is a list of chunk IDs. Simpler but ties evaluation to a specific chunking strategy.
 - **Token-Level (Recommended)**: Ground truth is character spans (doc_id, start, end, text). Chunker-independent, enabling fair comparison across different chunking strategies.
 
 ## Build & Development Commands
 
-*No implementation yet. When implemented, this project will be a Python package. Expected commands:*
+This project uses **uv** for package management, **ruff** for linting/formatting, and **ty** for type checking.
+
 ```bash
-# Install dependencies (once pyproject.toml exists)
-pip install -e ".[dev]"
+# Install dependencies
+uv sync --all-extras
 
 # Run tests
-pytest
+uv run pytest
 
 # Run single test file
-pytest tests/test_metrics.py
+uv run pytest tests/test_metrics.py -v
 
 # Run with coverage
-pytest --cov=rag_evaluation_framework
+uv run pytest --cov=rag_evaluation_system --cov-report=html
+
+# Lint and format
+uv run ruff check src tests
+uv run ruff format src tests
+
+# Type check
+uv run ty check src
 ```
 
 ## Architecture
@@ -41,15 +49,15 @@ Evaluation type is a foundational choice that shapes the entire pipeline:
 ### Two Evaluation Pipelines
 
 ```
-Chunk-Level:                          Token-Level:
-Corpus → Chunker → Chunk IDs          Corpus → CharacterSpan extraction
-       ↓                                      ↓
-ChunkLevelDataGenerator               TokenLevelDataGenerator (NO chunker)
-       ↓                                      ↓
-LangSmith (chunk IDs)                 LangSmith (character spans)
-       ↓                                      ↓
-ChunkLevelEvaluation                  TokenLevelEvaluation
-(ChunkRecall, ChunkPrecision)         (SpanRecall, SpanPrecision, SpanIoU)
+Chunk-Level:                                    Token-Level:
+Corpus → Chunker → Chunk IDs                    Corpus → CharacterSpan extraction
+       ↓                                               ↓
+ChunkLevelSyntheticDatasetGenerator             TokenLevelSyntheticDatasetGenerator (NO chunker)
+       ↓                                               ↓
+LangSmith (chunk IDs)                           LangSmith (character spans)
+       ↓                                               ↓
+ChunkLevelEvaluation                            TokenLevelEvaluation
+(ChunkRecall, ChunkPrecision, ChunkF1)          (SpanRecall, SpanPrecision, SpanIoU)
 ```
 
 ### Key Types
@@ -73,30 +81,26 @@ ChunkLevelEvaluation                  TokenLevelEvaluation
 
 Overlapping retrieved spans are merged before metric calculation. Each character is counted at most once to prevent sliding-window chunkers from inflating metrics.
 
-## Planned Directory Structure
+## Project Structure
 
 ```
-evaluation/
-└── metrics/
-    ├── base.py
-    ├── chunk_level/     # ChunkRecall, ChunkPrecision, ChunkF1
-    └── token_level/     # SpanRecall, SpanPrecision, SpanIoU
-
-synthetic_datagen/
-├── base.py
-├── chunk_level/         # ChunkLevelDataGenerator (requires chunker)
-└── token_level/         # TokenLevelDataGenerator (no chunker needed)
+src/rag_evaluation_system/
+├── types/                  # Pydantic models and type definitions
+├── chunkers/               # Chunker interfaces and implementations
+├── embedders/              # Embedding interfaces (OpenAI, SentenceTransformers)
+├── vector_stores/          # Vector store interfaces (ChromaDB)
+├── rerankers/              # Reranker interfaces (Cohere)
+├── synthetic_datagen/      # Synthetic data generators (chunk-level, token-level)
+├── evaluation/             # Evaluation orchestrators and metrics
+└── langsmith/              # LangSmith integration
 ```
 
 ## Implementation Roadmap
 
-1. Define final type definitions in `types.py`
-2. Implement `PositionAwareChunker` interface and adapter
-3. Implement `TokenLevelDataGenerator` with excerpt extraction
-4. Implement `ChunkLevelDataGenerator` with citation-style query generation
-5. Implement span-based metrics with interval merging
-6. Implement chunk-based metrics
-7. Implement `TokenLevelEvaluation.run()`
-8. Implement `ChunkLevelEvaluation.run()`
-9. Update VectorStore interface for position metadata
-10. Write comprehensive tests
+See `implementation_plan.md` for detailed steps. High-level phases:
+1. Core types with Pydantic models
+2. Chunker interfaces and adapter
+3. Synthetic data generators
+4. Metrics implementation (span merging)
+5. Evaluation orchestrators
+6. LangSmith integration
