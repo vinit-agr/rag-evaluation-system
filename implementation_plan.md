@@ -1,6 +1,6 @@
-# RAG Evaluation Framework - Implementation Plan
+# RAG Evaluation System - Implementation Plan
 
-This document provides a comprehensive, step-by-step implementation plan for the RAG Evaluation Framework. It uses modern Python tooling: **uv** (package management), **ty** (type checking), **ruff** (linting/formatting), and **pydantic** (runtime type validation).
+This document provides a comprehensive, step-by-step implementation plan for the RAG Evaluation System. It uses modern Python tooling: **uv** (package management), **ty** (type checking), **ruff** (linting/formatting), and **pydantic** (runtime type validation).
 
 ---
 
@@ -27,8 +27,8 @@ This document provides a comprehensive, step-by-step implementation plan for the
 
 ```bash
 # Create and initialize project
-uv init rag-evaluation-framework
-cd rag-evaluation-framework
+uv init rag-evaluation-system
+cd rag-evaluation-system
 
 # Set Python version
 uv python pin 3.11
@@ -39,7 +39,7 @@ uv python pin 3.11
 Create the following directory structure:
 
 ```
-rag-evaluation-framework/
+rag-evaluation-system/
 ├── pyproject.toml
 ├── README.md
 ├── CLAUDE.md
@@ -48,7 +48,7 @@ rag-evaluation-framework/
 ├── .python-version
 │
 ├── src/
-│   └── rag_evaluation/
+│   └── rag_evaluation_system/
 │       ├── __init__.py
 │       ├── py.typed                    # PEP 561 marker for typed package
 │       │
@@ -87,13 +87,13 @@ rag-evaluation-framework/
 │       │
 │       ├── synthetic_datagen/
 │       │   ├── __init__.py
-│       │   ├── base.py                 # SyntheticDataGenerator ABC
+│       │   ├── base.py                 # SyntheticDatasetGenerator ABC
 │       │   ├── chunk_level/
 │       │   │   ├── __init__.py
-│       │   │   └── generator.py        # ChunkLevelDataGenerator
+│       │   │   └── generator.py        # ChunkLevelSyntheticDatasetGenerator
 │       │   └── token_level/
 │       │       ├── __init__.py
-│       │       └── generator.py        # TokenLevelDataGenerator
+│       │       └── generator.py        # TokenLevelSyntheticDatasetGenerator
 │       │
 │       ├── evaluation/
 │       │   ├── __init__.py
@@ -149,7 +149,7 @@ rag-evaluation-framework/
 
 ```toml
 [project]
-name = "rag-evaluation-framework"
+name = "rag-evaluation-system"
 version = "0.1.0"
 description = "A comprehensive framework for evaluating RAG retrieval pipelines"
 readme = "README.md"
@@ -198,16 +198,16 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/rag-evaluation-framework"
-Documentation = "https://github.com/yourusername/rag-evaluation-framework#readme"
-Repository = "https://github.com/yourusername/rag-evaluation-framework"
+Homepage = "https://github.com/yourusername/rag-evaluation-system"
+Documentation = "https://github.com/yourusername/rag-evaluation-system#readme"
+Repository = "https://github.com/yourusername/rag-evaluation-system"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/rag_evaluation"]
+packages = ["src/rag_evaluation_system"]
 
 # =============================================================================
 # RUFF CONFIGURATION
@@ -238,7 +238,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["rag_evaluation"]
+known-first-party = ["rag_evaluation_system"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -287,7 +287,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src/rag_evaluation"]
+source = ["src/rag_evaluation_system"]
 branch = true
 
 [tool.coverage.report]
@@ -606,9 +606,11 @@ class Query(BaseModel):
 
 ```python
 """Ground truth types for chunk-level and token-level evaluation."""
+from typing import Any, TypedDict
+
 from pydantic import BaseModel, ConfigDict
 
-from .primitives import ChunkId
+from .primitives import ChunkId, QueryText
 from .queries import Query
 from .chunks import CharacterSpan
 
@@ -632,6 +634,30 @@ class TokenLevelGroundTruth(BaseModel):
 
     query: Query
     relevant_spans: list[CharacterSpan]
+
+
+# =============================================================================
+# LANGSMITH DATASET SCHEMAS
+# =============================================================================
+
+class ChunkLevelDatasetExample(TypedDict):
+    """LangSmith dataset example schema for chunk-level evaluation.
+
+    Follows LangSmith's inputs/outputs/metadata convention.
+    """
+    inputs: dict[str, QueryText]        # {"query": "What is RAG?"}
+    outputs: dict[str, list[ChunkId]]   # {"relevant_chunk_ids": ["chunk_xxx", ...]}
+    metadata: dict[str, Any]            # Top-level metadata (source_docs, generation_model, etc.)
+
+
+class TokenLevelDatasetExample(TypedDict):
+    """LangSmith dataset example schema for token-level evaluation.
+
+    Stores full character span data including text for convenience.
+    """
+    inputs: dict[str, QueryText]              # {"query": "What is RAG?"}
+    outputs: dict[str, list[CharacterSpan]]   # {"relevant_spans": [CharacterSpan(...), ...]}
+    metadata: dict[str, Any]                  # Top-level metadata (generation_model, etc.)
 ```
 
 ### 2.6 Result Types (`types/results.py`)
@@ -669,7 +695,7 @@ class TokenLevelRunOutput(BaseModel):
 ### 2.7 Module Exports (`types/__init__.py`)
 
 ```python
-"""Type definitions for the RAG evaluation framework."""
+"""Type definitions for the RAG evaluation system."""
 from .primitives import (
     DocumentId,
     QueryId,
@@ -681,7 +707,12 @@ from .primitives import (
 from .documents import Document, Corpus
 from .chunks import CharacterSpan, Chunk, PositionAwareChunk
 from .queries import Query
-from .ground_truth import ChunkLevelGroundTruth, TokenLevelGroundTruth
+from .ground_truth import (
+    ChunkLevelGroundTruth,
+    TokenLevelGroundTruth,
+    ChunkLevelDatasetExample,
+    TokenLevelDatasetExample,
+)
 from .results import EvaluationResult, ChunkLevelRunOutput, TokenLevelRunOutput
 
 __all__ = [
@@ -704,6 +735,9 @@ __all__ = [
     # Ground Truth
     "ChunkLevelGroundTruth",
     "TokenLevelGroundTruth",
+    # LangSmith Dataset Schemas
+    "ChunkLevelDatasetExample",
+    "TokenLevelDatasetExample",
     # Results
     "EvaluationResult",
     "ChunkLevelRunOutput",
@@ -725,7 +759,7 @@ __all__ = [
 """Abstract base classes for chunkers."""
 from abc import ABC, abstractmethod
 
-from rag_evaluation.types import Document, PositionAwareChunk
+from rag_evaluation_system.types import Document, PositionAwareChunk
 
 
 class Chunker(ABC):
@@ -789,8 +823,8 @@ class PositionAwareChunker(ABC):
 import logging
 from typing import TYPE_CHECKING
 
-from rag_evaluation.types import Document, PositionAwareChunk, PositionAwareChunkId
-from rag_evaluation.utils.hashing import generate_pa_chunk_id
+from rag_evaluation_system.types import Document, PositionAwareChunk, PositionAwareChunkId
+from rag_evaluation_system.utils.hashing import generate_pa_chunk_id
 from .base import Chunker, PositionAwareChunker
 
 if TYPE_CHECKING:
@@ -878,7 +912,7 @@ class ChunkerPositionAdapter(PositionAwareChunker):
 """Utilities for generating chunk IDs."""
 import hashlib
 
-from rag_evaluation.types import ChunkId, PositionAwareChunkId
+from rag_evaluation_system.types import ChunkId, PositionAwareChunkId
 
 
 def generate_chunk_id(content: str) -> ChunkId:
@@ -907,8 +941,8 @@ def generate_pa_chunk_id(content: str) -> PositionAwareChunkId:
 
 ```python
 """Recursive character text splitter implementation."""
-from rag_evaluation.types import Document, PositionAwareChunk
-from rag_evaluation.utils.hashing import generate_pa_chunk_id
+from rag_evaluation_system.types import Document, PositionAwareChunk
+from rag_evaluation_system.utils.hashing import generate_pa_chunk_id
 from .base import Chunker, PositionAwareChunker
 
 
@@ -1051,7 +1085,7 @@ if TYPE_CHECKING:
 class OpenAIEmbedder(Embedder):
     """OpenAI text embeddings.
 
-    Requires: pip install rag-evaluation-framework[openai]
+    Requires: pip install rag-evaluation-system[openai]
     """
 
     def __init__(
@@ -1070,7 +1104,7 @@ class OpenAIEmbedder(Embedder):
         except ImportError as e:
             raise ImportError(
                 "OpenAI package required. Install with: "
-                "pip install rag-evaluation-framework[openai]"
+                "pip install rag-evaluation-system[openai]"
             ) from e
 
         self._model = model
@@ -1114,7 +1148,7 @@ class OpenAIEmbedder(Embedder):
 """Abstract base class for vector stores."""
 from abc import ABC, abstractmethod
 
-from rag_evaluation.types import PositionAwareChunk
+from rag_evaluation_system.types import PositionAwareChunk
 
 
 class VectorStore(ABC):
@@ -1177,7 +1211,7 @@ class VectorStore(ABC):
 from typing import TYPE_CHECKING
 import uuid
 
-from rag_evaluation.types import PositionAwareChunk, PositionAwareChunkId, DocumentId
+from rag_evaluation_system.types import PositionAwareChunk, PositionAwareChunkId, DocumentId
 from .base import VectorStore
 
 if TYPE_CHECKING:
@@ -1187,7 +1221,7 @@ if TYPE_CHECKING:
 class ChromaVectorStore(VectorStore):
     """ChromaDB-backed vector store.
 
-    Requires: pip install rag-evaluation-framework[chroma]
+    Requires: pip install rag-evaluation-system[chroma]
     """
 
     def __init__(
@@ -1206,7 +1240,7 @@ class ChromaVectorStore(VectorStore):
         except ImportError as e:
             raise ImportError(
                 "ChromaDB package required. Install with: "
-                "pip install rag-evaluation-framework[chroma]"
+                "pip install rag-evaluation-system[chroma]"
             ) from e
 
         self._collection_name = collection_name or f"rag_eval_{uuid.uuid4().hex[:8]}"
@@ -1301,7 +1335,7 @@ class ChromaVectorStore(VectorStore):
 """Abstract base class for rerankers."""
 from abc import ABC, abstractmethod
 
-from rag_evaluation.types import PositionAwareChunk
+from rag_evaluation_system.types import PositionAwareChunk
 
 
 class Reranker(ABC):
@@ -1339,7 +1373,7 @@ class Reranker(ABC):
 """Cohere reranker implementation."""
 from typing import TYPE_CHECKING
 
-from rag_evaluation.types import PositionAwareChunk
+from rag_evaluation_system.types import PositionAwareChunk
 from .base import Reranker
 
 if TYPE_CHECKING:
@@ -1349,7 +1383,7 @@ if TYPE_CHECKING:
 class CohereReranker(Reranker):
     """Cohere reranking model.
 
-    Requires: pip install rag-evaluation-framework[cohere]
+    Requires: pip install rag-evaluation-system[cohere]
     """
 
     def __init__(
@@ -1368,7 +1402,7 @@ class CohereReranker(Reranker):
         except ImportError as e:
             raise ImportError(
                 "Cohere package required. Install with: "
-                "pip install rag-evaluation-framework[cohere]"
+                "pip install rag-evaluation-system[cohere]"
             ) from e
 
         self._model = model
@@ -1416,10 +1450,10 @@ class CohereReranker(Reranker):
 from abc import ABC, abstractmethod
 from typing import Any
 
-from rag_evaluation.types import Corpus
+from rag_evaluation_system.types import Corpus
 
 
-class SyntheticDataGenerator(ABC):
+class SyntheticDatasetGenerator(ABC):
     """Base class for synthetic data generation."""
 
     def __init__(self, llm_client: Any, corpus: Corpus):
@@ -1452,7 +1486,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from rag_evaluation.types import (
+from rag_evaluation_system.types import (
     Corpus,
     Query,
     QueryId,
@@ -1460,9 +1494,9 @@ from rag_evaluation.types import (
     ChunkId,
     ChunkLevelGroundTruth,
 )
-from rag_evaluation.chunkers.base import Chunker
-from rag_evaluation.utils.hashing import generate_chunk_id
-from ..base import SyntheticDataGenerator
+from rag_evaluation_system.chunkers.base import Chunker
+from rag_evaluation_system.utils.hashing import generate_chunk_id
+from ..base import SyntheticDatasetGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -1473,7 +1507,7 @@ class GeneratedQAPair(BaseModel):
     relevant_chunk_ids: list[str]
 
 
-class ChunkLevelDataGenerator(SyntheticDataGenerator):
+class ChunkLevelSyntheticDatasetGenerator(SyntheticDatasetGenerator):
     """Generate synthetic QA pairs with chunk-level ground truth.
 
     Requires a chunker because chunk IDs must exist before referencing
@@ -1639,7 +1673,7 @@ For each question, list the chunk IDs that contain the answer."""
         dataset_name: str | None,
     ) -> None:
         """Upload ground truth to LangSmith."""
-        from rag_evaluation.langsmith.upload import upload_chunk_level_dataset
+        from rag_evaluation_system.langsmith.upload import upload_chunk_level_dataset
         upload_chunk_level_dataset(ground_truth, dataset_name)
 ```
 
@@ -1657,7 +1691,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from rag_evaluation.types import (
+from rag_evaluation_system.types import (
     Corpus,
     Document,
     Query,
@@ -1666,7 +1700,7 @@ from rag_evaluation.types import (
     CharacterSpan,
     TokenLevelGroundTruth,
 )
-from ..base import SyntheticDataGenerator
+from ..base import SyntheticDatasetGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -1682,7 +1716,7 @@ class GeneratedQAWithExcerpts(BaseModel):
     excerpts: list[str]
 
 
-class TokenLevelDataGenerator(SyntheticDataGenerator):
+class TokenLevelSyntheticDatasetGenerator(SyntheticDatasetGenerator):
     """Generate synthetic QA pairs with character span ground truth.
 
     NO chunker required. Ground truth is chunker-independent.
@@ -1873,7 +1907,7 @@ Extract the exact passages that answer this question. Copy verbatim."""
         dataset_name: str | None,
     ) -> None:
         """Upload ground truth to LangSmith."""
-        from rag_evaluation.langsmith.upload import upload_token_level_dataset
+        from rag_evaluation_system.langsmith.upload import upload_token_level_dataset
         upload_token_level_dataset(ground_truth, dataset_name)
 ```
 
@@ -1887,7 +1921,7 @@ Extract the exact passages that answer this question. Copy verbatim."""
 """Base classes for evaluation metrics."""
 from abc import ABC, abstractmethod
 
-from rag_evaluation.types import ChunkId, CharacterSpan
+from rag_evaluation_system.types import ChunkId, CharacterSpan
 
 
 class ChunkLevelMetric(ABC):
@@ -1950,7 +1984,7 @@ class TokenLevelMetric(ABC):
 
 ```python
 """Chunk recall metric."""
-from rag_evaluation.types import ChunkId
+from rag_evaluation_system.types import ChunkId
 from ..base import ChunkLevelMetric
 
 
@@ -1980,7 +2014,7 @@ class ChunkRecall(ChunkLevelMetric):
 
 ```python
 """Chunk precision metric."""
-from rag_evaluation.types import ChunkId
+from rag_evaluation_system.types import ChunkId
 from ..base import ChunkLevelMetric
 
 
@@ -2010,7 +2044,7 @@ class ChunkPrecision(ChunkLevelMetric):
 
 ```python
 """Chunk F1 metric."""
-from rag_evaluation.types import ChunkId
+from rag_evaluation_system.types import ChunkId
 from ..base import ChunkLevelMetric
 from .recall import ChunkRecall
 from .precision import ChunkPrecision
@@ -2047,7 +2081,7 @@ class ChunkF1(ChunkLevelMetric):
 
 ```python
 """Utilities for span operations."""
-from rag_evaluation.types import CharacterSpan, DocumentId
+from rag_evaluation_system.types import CharacterSpan, DocumentId
 
 
 def merge_overlapping_spans(spans: list[CharacterSpan]) -> list[CharacterSpan]:
@@ -2134,7 +2168,7 @@ def calculate_overlap(
 
 ```python
 """Span recall metric."""
-from rag_evaluation.types import CharacterSpan
+from rag_evaluation_system.types import CharacterSpan
 from ..base import TokenLevelMetric
 from .utils import merge_overlapping_spans, calculate_overlap
 
@@ -2170,7 +2204,7 @@ class SpanRecall(TokenLevelMetric):
 
 ```python
 """Span precision metric."""
-from rag_evaluation.types import CharacterSpan
+from rag_evaluation_system.types import CharacterSpan
 from ..base import TokenLevelMetric
 from .utils import merge_overlapping_spans, calculate_overlap
 
@@ -2205,7 +2239,7 @@ class SpanPrecision(TokenLevelMetric):
 
 ```python
 """Span IoU (Intersection over Union) metric."""
-from rag_evaluation.types import CharacterSpan
+from rag_evaluation_system.types import CharacterSpan
 from ..base import TokenLevelMetric
 from .utils import merge_overlapping_spans, calculate_overlap
 
@@ -2254,19 +2288,19 @@ class SpanIoU(TokenLevelMetric):
 import logging
 from typing import Callable
 
-from rag_evaluation.types import (
+from rag_evaluation_system.types import (
     Corpus,
     Chunk,
     ChunkId,
     EvaluationResult,
     ChunkLevelGroundTruth,
 )
-from rag_evaluation.chunkers.base import Chunker
-from rag_evaluation.embedders.base import Embedder
-from rag_evaluation.vector_stores.base import VectorStore
-from rag_evaluation.vector_stores.chroma import ChromaVectorStore
-from rag_evaluation.rerankers.base import Reranker
-from rag_evaluation.utils.hashing import generate_chunk_id
+from rag_evaluation_system.chunkers.base import Chunker
+from rag_evaluation_system.embedders.base import Embedder
+from rag_evaluation_system.vector_stores.base import VectorStore
+from rag_evaluation_system.vector_stores.chroma import ChromaVectorStore
+from rag_evaluation_system.rerankers.base import Reranker
+from rag_evaluation_system.utils.hashing import generate_chunk_id
 from .metrics.base import ChunkLevelMetric
 from .metrics.chunk_level import ChunkRecall, ChunkPrecision, ChunkF1
 
@@ -2406,7 +2440,7 @@ class ChunkLevelEvaluation:
         chunk_ids: list[ChunkId],
     ) -> list:
         """Convert to PositionAwareChunk for storage (without real positions)."""
-        from rag_evaluation.types import PositionAwareChunk, PositionAwareChunkId, DocumentId
+        from rag_evaluation_system.types import PositionAwareChunk, PositionAwareChunkId, DocumentId
 
         return [
             PositionAwareChunk(
@@ -2421,7 +2455,7 @@ class ChunkLevelEvaluation:
 
     def _load_ground_truth(self) -> list[ChunkLevelGroundTruth]:
         """Load ground truth from LangSmith."""
-        from rag_evaluation.langsmith.client import load_chunk_level_dataset
+        from rag_evaluation_system.langsmith.client import load_chunk_level_dataset
         return load_chunk_level_dataset(self._dataset_name)
 ```
 
@@ -2432,18 +2466,18 @@ class ChunkLevelEvaluation:
 import logging
 from typing import Union
 
-from rag_evaluation.types import (
+from rag_evaluation_system.types import (
     Corpus,
     CharacterSpan,
     EvaluationResult,
     TokenLevelGroundTruth,
 )
-from rag_evaluation.chunkers.base import Chunker, PositionAwareChunker
-from rag_evaluation.chunkers.adapter import ChunkerPositionAdapter
-from rag_evaluation.embedders.base import Embedder
-from rag_evaluation.vector_stores.base import VectorStore
-from rag_evaluation.vector_stores.chroma import ChromaVectorStore
-from rag_evaluation.rerankers.base import Reranker
+from rag_evaluation_system.chunkers.base import Chunker, PositionAwareChunker
+from rag_evaluation_system.chunkers.adapter import ChunkerPositionAdapter
+from rag_evaluation_system.embedders.base import Embedder
+from rag_evaluation_system.vector_stores.base import VectorStore
+from rag_evaluation_system.vector_stores.chroma import ChromaVectorStore
+from rag_evaluation_system.rerankers.base import Reranker
 from .metrics.base import TokenLevelMetric
 from .metrics.token_level import SpanRecall, SpanPrecision, SpanIoU
 
@@ -2571,7 +2605,7 @@ class TokenLevelEvaluation:
 
     def _load_ground_truth(self) -> list[TokenLevelGroundTruth]:
         """Load ground truth from LangSmith."""
-        from rag_evaluation.langsmith.client import load_token_level_dataset
+        from rag_evaluation_system.langsmith.client import load_token_level_dataset
         return load_token_level_dataset(self._dataset_name)
 ```
 
@@ -2585,7 +2619,7 @@ class TokenLevelEvaluation:
 """LangSmith client utilities."""
 from langsmith import Client
 
-from rag_evaluation.types import (
+from rag_evaluation_system.types import (
     Query,
     QueryId,
     QueryText,
@@ -2667,7 +2701,7 @@ def load_token_level_dataset(dataset_name: str) -> list[TokenLevelGroundTruth]:
 import logging
 from langsmith import Client
 
-from rag_evaluation.types import ChunkLevelGroundTruth, TokenLevelGroundTruth
+from rag_evaluation_system.types import ChunkLevelGroundTruth, TokenLevelGroundTruth
 
 logger = logging.getLogger(__name__)
 
@@ -2696,8 +2730,8 @@ def upload_chunk_level_dataset(
             inputs={"query": gt.query.text},
             outputs={
                 "relevant_chunk_ids": [str(cid) for cid in gt.relevant_chunk_ids],
-                "metadata": gt.query.metadata,
             },
+            metadata=gt.query.metadata,  # Top-level metadata for LangSmith
             dataset_id=dataset.id,
         )
 
@@ -2735,8 +2769,8 @@ def upload_token_level_dataset(
                     }
                     for span in gt.relevant_spans
                 ],
-                "metadata": gt.query.metadata,
             },
+            metadata=gt.query.metadata,  # Top-level metadata for LangSmith
             dataset_id=dataset.id,
         )
 
@@ -2767,8 +2801,8 @@ def upload_token_level_dataset(
 ### 10.3 Package Exports (`__init__.py`)
 
 ```python
-"""RAG Evaluation Framework - Comprehensive RAG retrieval evaluation."""
-from rag_evaluation.types import (
+"""RAG Evaluation System - Comprehensive RAG retrieval evaluation."""
+from rag_evaluation_system.types import (
     Document,
     Corpus,
     Chunk,
@@ -2779,37 +2813,37 @@ from rag_evaluation.types import (
     TokenLevelGroundTruth,
     EvaluationResult,
 )
-from rag_evaluation.chunkers import (
+from rag_evaluation_system.chunkers import (
     Chunker,
     PositionAwareChunker,
     ChunkerPositionAdapter,
     RecursiveCharacterChunker,
 )
-from rag_evaluation.embedders import Embedder
-from rag_evaluation.vector_stores import VectorStore
-from rag_evaluation.rerankers import Reranker
-from rag_evaluation.synthetic_datagen import (
-    ChunkLevelDataGenerator,
-    TokenLevelDataGenerator,
+from rag_evaluation_system.embedders import Embedder
+from rag_evaluation_system.vector_stores import VectorStore
+from rag_evaluation_system.rerankers import Reranker
+from rag_evaluation_system.synthetic_datagen import (
+    ChunkLevelSyntheticDatasetGenerator,
+    TokenLevelSyntheticDatasetGenerator,
 )
-from rag_evaluation.evaluation import (
+from rag_evaluation_system.evaluation import (
     ChunkLevelEvaluation,
     TokenLevelEvaluation,
 )
 
 # Conditional imports for optional dependencies
 try:
-    from rag_evaluation.embedders.openai import OpenAIEmbedder
+    from rag_evaluation_system.embedders.openai import OpenAIEmbedder
 except ImportError:
     OpenAIEmbedder = None  # type: ignore
 
 try:
-    from rag_evaluation.vector_stores.chroma import ChromaVectorStore
+    from rag_evaluation_system.vector_stores.chroma import ChromaVectorStore
 except ImportError:
     ChromaVectorStore = None  # type: ignore
 
 try:
-    from rag_evaluation.rerankers.cohere import CohereReranker
+    from rag_evaluation_system.rerankers.cohere import CohereReranker
 except ImportError:
     CohereReranker = None  # type: ignore
 
@@ -2836,8 +2870,8 @@ __all__ = [
     "VectorStore",
     "Reranker",
     # Data Generation
-    "ChunkLevelDataGenerator",
-    "TokenLevelDataGenerator",
+    "ChunkLevelSyntheticDatasetGenerator",
+    "TokenLevelSyntheticDatasetGenerator",
     # Evaluation
     "ChunkLevelEvaluation",
     "TokenLevelEvaluation",
@@ -2881,7 +2915,7 @@ tests/
 ```python
 """Shared test fixtures."""
 import pytest
-from rag_evaluation.types import (
+from rag_evaluation_system.types import (
     Document,
     Corpus,
     DocumentId,
@@ -2919,7 +2953,7 @@ def sample_spans() -> list[CharacterSpan]:
 @pytest.fixture
 def mock_embedder():
     """Mock embedder that returns fixed-dimension vectors."""
-    from rag_evaluation.embedders.base import Embedder
+    from rag_evaluation_system.embedders.base import Embedder
 
     class MockEmbedder(Embedder):
         @property
@@ -2946,7 +2980,7 @@ def mock_embedder():
 ```python
 """Tests for CharacterSpan."""
 import pytest
-from rag_evaluation.types import CharacterSpan, DocumentId
+from rag_evaluation_system.types import CharacterSpan, DocumentId
 
 
 class TestCharacterSpan:
@@ -2987,13 +3021,13 @@ class TestCharacterSpan:
 ```python
 """Tests for token-level metrics."""
 import pytest
-from rag_evaluation.types import CharacterSpan, DocumentId
-from rag_evaluation.evaluation.metrics.token_level import (
+from rag_evaluation_system.types import CharacterSpan, DocumentId
+from rag_evaluation_system.evaluation.metrics.token_level import (
     SpanRecall,
     SpanPrecision,
     SpanIoU,
 )
-from rag_evaluation.evaluation.metrics.token_level.utils import merge_overlapping_spans
+from rag_evaluation_system.evaluation.metrics.token_level.utils import merge_overlapping_spans
 
 
 class TestSpanMerging:
@@ -3080,7 +3114,7 @@ class TestSpanIoU:
 uv run pytest
 
 # Run with coverage
-uv run pytest --cov=rag_evaluation --cov-report=html
+uv run pytest --cov=rag_evaluation_system --cov-report=html
 
 # Run only unit tests
 uv run pytest tests/unit/
@@ -3197,7 +3231,7 @@ Use semantic versioning:
 
 ## Summary
 
-This implementation plan provides a comprehensive roadmap for building the RAG Evaluation Framework using modern Python practices:
+This implementation plan provides a comprehensive roadmap for building the RAG Evaluation System using modern Python practices:
 
 1. **Modern Tooling**: uv for package management, ruff for linting/formatting, ty for type checking
 2. **Type Safety**: Pydantic models with validation, NewType aliases for semantic clarity
@@ -3205,4 +3239,4 @@ This implementation plan provides a comprehensive roadmap for building the RAG E
 4. **Two Evaluation Paradigms**: Chunk-level (simpler) and Token-level (more granular)
 5. **Extensible Design**: Easy to add new chunkers, embedders, vector stores, and metrics
 
-The framework enables fair comparison of RAG retrieval pipelines through standardized evaluation against LangSmith-stored ground truth datasets.
+The system enables fair comparison of RAG retrieval pipelines through standardized evaluation against LangSmith-stored ground truth datasets.
