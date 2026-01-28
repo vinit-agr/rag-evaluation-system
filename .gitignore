@@ -147,3 +147,6 @@ Thumbs.db
 *.db
 *.sqlite
 chroma_data/
+
+# Data
+data/

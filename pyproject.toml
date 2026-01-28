@@ -31,11 +31,13 @@ openai = ["openai>=1.0"]
 cohere = ["cohere>=5.0"]
 chroma = ["chromadb>=0.4"]
 sentence-transformers = ["sentence-transformers>=2.0"]
+streamlit = ["streamlit>=1.30", "python-dotenv>=1.0"]
 all = [
     "openai>=1.0",
     "cohere>=5.0",
     "chromadb>=0.4",
     "sentence-transformers>=2.0",
+    "streamlit>=1.30",
 ]
 dev = [
     "pytest>=8.0",
